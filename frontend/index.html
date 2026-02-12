@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DreamCatcher</title>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #f4f4f9; }
+        .container { background: white; padding: 2rem; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #333; }
+        .row { margin-bottom: 1rem; }
+        label { display: block; margin-bottom: 0.5rem; font-weight: bold; }
+        input[type="text"], input[type="file"] { width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 1rem; background: #0070f3; color: white; border: none; border-radius: 4px; font-size: 1rem; cursor: pointer; }
+        button:disabled { background: #aaa; }
+        .preview { display: flex; gap: 1rem; margin-top: 2rem; flex-wrap: wrap; }
+        .box { flex: 1; min-width: 300px; text-align: center; }
+        img { max-width: 100%; border-radius: 8px; border: 1px solid #ddd; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌙 DreamCatcher</h1>
+        <div class="row">
+            <label>1. 上传照片 (人脸清晰)</label>
+            <input type="file" id="fileIn" accept="image/*">
+        </div>
+        <div class="row">
+            <label>2. 描述梦境 (英文)</label>
+            <input type="text" id="promptIn" placeholder="e.g. wearing a spacesuit on Mars">
+        </div>
+        <button id="btn" onclick="run()">开始生成</button>
+        <p id="msg" style="text-align: center; color: #666;"></p>
+
+        <div class="preview">
+            <div class="box"><p>原图</p><img id="imgOrigin"></div>
+            <div class="box"><p>生成图</p><img id="imgResult"></div>
+        </div>
+    </div>
+
+    <script>
+        // ⚠️ 下一步部署完 Worker 后，把 URL 填在这里 ⚠️
+        const WORKER_URL = ""; 
+
+        const fileIn = document.getElementById('fileIn');
+        const imgOrigin = document.getElementById('imgOrigin');
+        const imgResult = document.getElementById('imgResult');
+        const msg = document.getElementById('msg');
+
+        fileIn.onchange = e => {
+            const f = e.target.files[0];
+            if(f) imgOrigin.src = URL.createObjectURL(f);
+        };
+
+        async function run() {
+            if(!WORKER_URL) return alert("请先在代码中填入 Worker URL！");
+            if(!fileIn.files[0]) return alert("请上传图片");
+            
+            const btn = document.getElementById('btn');
+            btn.disabled = true;
+            btn.innerText = "生成中...";
+            msg.innerText = "正在上传并请求 AI...";
+
+            try {
+                const buf = await fileIn.files[0].arrayBuffer();
+                const uint8 = Array.from(new Uint8Array(buf)); // 转数组
+
+                const res = await fetch(WORKER_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        prompt: document.getElementById('promptIn').value,
+                        image: uint8
+                    })
+                });
+                
+                if(!res.ok) throw new Error(await res.text());
+                
+                const blob = await res.blob();
+                imgResult.src = URL.createObjectURL(blob);
+                msg.innerText = "完成！";
+            } catch(e) {
+                alert("错误: " + e.message);
+                msg.innerText = "失败";
+            }
+            btn.disabled = false;
+            btn.innerText = "开始生成";
+        }
+    </script>
+</body>
+</html>
