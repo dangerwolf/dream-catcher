@@ -1,24 +1,28 @@
 import { Ai } from '@cloudflare/ai';
 
+// 引入 base64-js 库来确保转换（CF环境兼容性更好）
+// 注意：如果您的 package.json 还没删掉这两个依赖，请务必保留！
+// 如果之前删了，请把下面这行注释掉，改用 Buffer.from()
+// import * as base64 from 'base64-js'; 
+
 const HTML_CONTENT = `
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DreamCatcher Ultimate</title>
+    <title>DreamCatcher Ultimate (Fix)</title>
     <style>
-        body { font-family: -apple-system, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; background: #0f0f12; color: #e0e0e0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; background: #0f0f12; color: #e0e0e0; }
         .container { background: #1e1e24; padding: 2rem; border-radius: 16px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); border: 1px solid #333; }
         h1 { text-align: center; margin-bottom: 2rem; background: linear-gradient(135deg, #00c6ff, #0072ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 2rem; }
         
-        /* Tab 切换样式 */
+        /* Tab 切换 */
         .tabs { display: flex; margin-bottom: 2rem; border-bottom: 2px solid #333; }
         .tab-btn { flex: 1; padding: 15px; background: none; border: none; color: #888; font-size: 1rem; cursor: pointer; transition: all 0.3s; font-weight: bold; }
         .tab-btn:hover { color: #ccc; background: #2a2a32; }
         .tab-btn.active { color: #0072ff; border-bottom: 2px solid #0072ff; background: #25252b; }
         
-        /* 内容区域 */
         .tab-content { display: none; animation: fadeIn 0.3s ease; }
         .tab-content.active { display: block; }
         
@@ -30,7 +34,6 @@ const HTML_CONTENT = `
         
         input[type="file"] { width: 100%; padding: 12px; background: #2a2a32; border-radius: 8px; border: 1px dashed #555; cursor: pointer; }
         
-        /* 滑块样式 */
         .slider-container { display: flex; align-items: center; gap: 15px; background: #2a2a32; padding: 10px 15px; border-radius: 8px; }
         input[type="range"] { flex: 1; height: 6px; background: #444; border-radius: 3px; outline: none; -webkit-appearance: none; }
         input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; background: #0072ff; border-radius: 50%; cursor: pointer; }
@@ -60,7 +63,7 @@ const HTML_CONTENT = `
             <button class="tab-btn" onclick="switchTab('txt2img')">🎨 FLUX (纯文字造梦)</button>
         </div>
 
-        <!-- Tab 1: Image to Image (v1.5) -->
+        <!-- Tab 1: Img2Img (v1.5) -->
         <div id="tab-img2img" class="tab-content active">
             <div class="row">
                 <label>1. 上传参考图 (自动裁剪 512px)</label>
@@ -81,7 +84,7 @@ const HTML_CONTENT = `
             <button id="btnImg" onclick="runImg2Img()">⚡ v1.5 启动 (需传图)</button>
         </div>
 
-        <!-- Tab 2: Text to Image (FLUX) -->
+        <!-- Tab 2: Txt2Img (FLUX) -->
         <div id="tab-txt2img" class="tab-content">
             <div class="row">
                 <label>1. 详细描述你的梦境 (英文, FLUX 理解力超强)</label>
@@ -99,7 +102,6 @@ const HTML_CONTENT = `
     </div>
 
     <script>
-        // Tab 切换逻辑
         function switchTab(mode) {
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -107,11 +109,11 @@ const HTML_CONTENT = `
             if(mode === 'img2img') {
                 document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
                 document.getElementById('tab-img2img').classList.add('active');
-                document.getElementById('boxOrigin').style.display = 'block'; // 显示原图框
+                document.getElementById('boxOrigin').style.display = 'block'; 
             } else {
                 document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
                 document.getElementById('tab-txt2img').classList.add('active');
-                document.getElementById('boxOrigin').style.display = 'none'; // 隐藏原图框
+                document.getElementById('boxOrigin').style.display = 'none'; 
             }
             document.getElementById('msg').innerText = "";
         }
@@ -126,7 +128,7 @@ const HTML_CONTENT = `
 
         slider.oninput = () => sliderVal.innerText = slider.value;
 
-        // 图片预处理 (v1.5 专用)
+        // 图片预处理
         fileIn.onchange = e => {
             const file = e.target.files[0];
             if (!file) return;
@@ -136,7 +138,7 @@ const HTML_CONTENT = `
                 img.onload = () => {
                     const canvas = document.createElement('canvas');
                     const ctx = canvas.getContext('2d');
-                    const SIZE = 512; // v1.5 强制 512
+                    const SIZE = 512;
                     canvas.width = SIZE; canvas.height = SIZE;
                     const minScale = Math.max(SIZE/img.width, SIZE/img.height);
                     const w = img.width*minScale; const h = img.height*minScale;
@@ -152,6 +154,32 @@ const HTML_CONTENT = `
             reader.readAsDataURL(file);
         };
 
+        // 通用生成逻辑 (接收 Base64)
+        async function sendRequest(payload) {
+            const res = await fetch("", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if(!res.ok) throw new Error(await res.text());
+            
+            // 关键改动：我们直接把响应当 Blob 处理 (后端如果直接返回二进制)
+            // 如果后端返回 JSON，我们解析 JSON 里的 Base64
+            const contentType = res.headers.get("content-type");
+            if (contentType && contentType.includes("application/json")) {
+                const json = await res.json();
+                if (json.image) {
+                    return "data:image/png;base64," + json.image;
+                } else {
+                    throw new Error("No image data returned");
+                }
+            } else {
+                // 如果是直接二进制流
+                const blob = await res.blob();
+                return URL.createObjectURL(blob);
+            }
+        }
+
         async function runImg2Img() {
             if(!processedBlob) return alert("请先上传图片");
             if(!document.getElementById('promptImg').value) return alert("请输入描述");
@@ -164,20 +192,21 @@ const HTML_CONTENT = `
             try {
                 const buf = await processedBlob.arrayBuffer();
                 const uint8 = Array.from(new Uint8Array(buf));
+                
+                // Base64 转换 (手动实现简单版，防止无库依赖)
+                const base64String = btoa(
+                    new Uint8Array(buf)
+                        .reduce((data, byte) => data + String.fromCharCode(byte), '')
+                );
 
-                const res = await fetch("", {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        type: 'img2img', // 告诉后端用哪个模型
-                        prompt: document.getElementById('promptImg').value,
-                        image: uint8,
-                        strength: parseFloat(slider.value)
-                    })
+                const imageUrl = await sendRequest({
+                    type: 'img2img',
+                    prompt: document.getElementById('promptImg').value,
+                    image_base64: base64String, // 发送 Base64 字符串
+                    strength: parseFloat(slider.value)
                 });
-                if(!res.ok) throw new Error(await res.text());
-                const blob = await res.blob();
-                imgResult.src = URL.createObjectURL(blob);
+                
+                imgResult.src = imageUrl;
                 imgResult.classList.add('show');
                 msg.innerText = "✨ v1.5 生成成功！";
             } catch(e) { console.error(e); msg.innerText = "❌ Error: " + e.message; }
@@ -194,19 +223,14 @@ const HTML_CONTENT = `
             imgResult.classList.remove('show');
 
             try {
-                const res = await fetch("", {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        type: 'txt2img', // 告诉后端用 FLUX
-                        prompt: prompt
-                    })
+                const imageUrl = await sendRequest({
+                    type: 'txt2img',
+                    prompt: prompt
                 });
-                if(!res.ok) throw new Error(await res.text());
-                const blob = await res.blob();
-                imgResult.src = URL.createObjectURL(blob);
+                
+                imgResult.src = imageUrl;
                 imgResult.classList.add('show');
-                msg.innerText = "🚀 FLUX 生成完毕！画质惊人！";
+                msg.innerText = "🚀 FLUX 生成完毕！";
             } catch(e) { console.error(e); msg.innerText = "❌ Error: " + e.message; }
             finally { btn.disabled = false; }
         }
@@ -227,44 +251,68 @@ export default {
       try {
         const data = await request.json();
         const ai = new Ai(env.AI);
+        let response; // 存储 AI 原始响应
 
-        // ==========================================
-        // 模式 1: 图生图 (Img2Img) - 使用 v1.5
-        // ==========================================
+        // ----------------------------------------------------
+        // 模式 1: Img2Img (v1.5)
+        // ----------------------------------------------------
         if (data.type === 'img2img') {
-            const MODEL_ID = '@cf/runwayml/stable-diffusion-v1-5-img2img';
-            const inputs = {
-                prompt: `${data.prompt}, (masterpiece:1.2), (best quality:1.2), (photorealistic:1.3), 8k resolution, cinematic lighting, sharp focus`,
+            // 将 Base64 字符串转回 Uint8Array
+            const binaryString = atob(data.image_base64);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            
+            response = await ai.run('@cf/runwayml/stable-diffusion-v1-5-img2img', {
+                prompt: `${data.prompt}, (masterpiece:1.2), (photorealistic:1.3), 8k resolution, cinematic lighting`,
                 negative_prompt: "blur, low quality, cartoon, 3d, painting, illustration, deformed, ugly, distorted face, bad anatomy, watermark, text",
-                image: data.image,
+                image: [...bytes], // 必须转为数组
                 strength: data.strength || 0.5,
                 guidance: 7.5,
                 num_steps: 20
-            };
-            const response = await ai.run(MODEL_ID, inputs);
-            return new Response(response, { headers: { 'Content-Type': 'image/png' } });
+            });
         }
 
-        // ==========================================
-        // 模式 2: 文生图 (Txt2Image) - 使用 FLUX
-        // ==========================================
-        if (data.type === 'txt2img') {
-            // 🔥 使用最新的 Flux-1-Schnell 模型
-            const MODEL_ID = '@cf/black-forest-labs/flux-1-schnell';
-            
-            const inputs = {
+        // ----------------------------------------------------
+        // 模式 2: Txt2Image (FLUX)
+        // ----------------------------------------------------
+        else if (data.type === 'txt2img') {
+            // FLUX 文生图
+            response = await ai.run('@cf/black-forest-labs/flux-1-schnell', {
                 prompt: data.prompt,
-                num_steps: 4 // FLUX 只需 4 步就能生成高质量图片，极快！
-            };
-            
-            const response = await ai.run(MODEL_ID, inputs);
-            return new Response(response, { headers: { 'Content-Type': 'image/png' } });
+                num_steps: 4 
+            });
+        }
+        else {
+            return new Response('Invalid type', { status: 400 });
         }
 
-        return new Response('Invalid type', { status: 400 });
+        // ----------------------------------------------------
+        // 关键修复：统一转换为 Base64 返回给前端
+        // Cloudflare AI 返回的是 ReadableStream，我们需要读取并转换
+        // ----------------------------------------------------
+        const headers = { 'Content-Type': 'application/json' };
+        
+        // 将 Response 对象转换为 ArrayBuffer
+        const arrayBuffer = await new Response(response).arrayBuffer();
+        
+        // 手动转 Base64 (避免依赖外部库)
+        let binary = '';
+        const bytes = new Uint8Array(arrayBuffer);
+        const len = bytes.byteLength;
+        for (let i = 0; i < len; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        const base64Image = btoa(binary);
+
+        return new Response(JSON.stringify({ image: base64Image }), { headers });
 
       } catch (error) {
-        return new Response(`Error: ${error.message}`, { status: 500 });
+        return new Response(JSON.stringify({ error: error.message }), { 
+            status: 500,
+            headers: { 'Content-Type': 'application/json' }
+        });
       }
     }
 
