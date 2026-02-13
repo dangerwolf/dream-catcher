@@ -249,7 +249,7 @@ export default {
                 // 🚀 这里是关键！我们不再解码，直接把前端发来的 Base64 字符串传给 image_b64
                 image_b64: data.image_base64, 
                 strength: data.strength || 0.5,
-                num_steps: 4, 
+                num_steps: 20, 
                 guidance: 7.5
             });
             
