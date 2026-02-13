@@ -1,10 +1,5 @@
 import { Ai } from '@cloudflare/ai';
 
-// 引入 base64-js 库来确保转换（CF环境兼容性更好）
-// 注意：如果您的 package.json 还没删掉这两个依赖，请务必保留！
-// 如果之前删了，请把下面这行注释掉，改用 Buffer.from()
-// import * as base64 from 'base64-js'; 
-
 const HTML_CONTENT = `
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -17,7 +12,6 @@ const HTML_CONTENT = `
         .container { background: #1e1e24; padding: 2rem; border-radius: 16px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); border: 1px solid #333; }
         h1 { text-align: center; margin-bottom: 2rem; background: linear-gradient(135deg, #00c6ff, #0072ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 2rem; }
         
-        /* Tab 切换 */
         .tabs { display: flex; margin-bottom: 2rem; border-bottom: 2px solid #333; }
         .tab-btn { flex: 1; padding: 15px; background: none; border: none; color: #888; font-size: 1rem; cursor: pointer; transition: all 0.3s; font-weight: bold; }
         .tab-btn:hover { color: #ccc; background: #2a2a32; }
@@ -59,14 +53,14 @@ const HTML_CONTENT = `
         <h1>✨ DreamCatcher Ultimate</h1>
         
         <div class="tabs">
-            <button class="tab-btn active" onclick="switchTab('img2img')">📷 Img2Img (修图/改图)</button>
-            <button class="tab-btn" onclick="switchTab('txt2img')">🎨 FLUX (纯文字造梦)</button>
+            <button class="tab-btn active" onclick="switchTab('img2img')">📷 Img2Img (SDXL Lightning)</button>
+            <button class="tab-btn" onclick="switchTab('txt2img')">🎨 Txt2Img (FLUX Schnell)</button>
         </div>
 
-        <!-- Tab 1: Img2Img (v1.5) -->
+        <!-- Tab 1: Img2Img (SDXL Lightning) -->
         <div id="tab-img2img" class="tab-content active">
             <div class="row">
-                <label>1. 上传参考图 (自动裁剪 512px)</label>
+                <label>1. 上传参考图 (支持 1024px)</label>
                 <input type="file" id="fileIn" accept="image/*">
             </div>
             <div class="row">
@@ -81,14 +75,14 @@ const HTML_CONTENT = `
                     <span id="strengthVal" class="value-display">0.5</span>
                 </div>
             </div>
-            <button id="btnImg" onclick="runImg2Img()">⚡ v1.5 启动 (需传图)</button>
+            <button id="btnImg" onclick="runImg2Img()">⚡ SDXL 启动 (需传图)</button>
         </div>
 
         <!-- Tab 2: Txt2Img (FLUX) -->
         <div id="tab-txt2img" class="tab-content">
             <div class="row">
-                <label>1. 详细描述你的梦境 (英文, FLUX 理解力超强)</label>
-                <textarea id="promptTxt" rows="4" style="width:100%; background:#2a2a32; color:white; border:1px solid #444; border-radius:8px; padding:10px;" placeholder="A cinematic shot of a cyberpunk city at night, neon lights reflecting on wet pavement, extremely detailed, 8k resolution..."></textarea>
+                <label>1. 详细描述你的梦境 (FLUX 懂你)</label>
+                <textarea id="promptTxt" rows="4" placeholder="A cinematic shot of a cyberpunk city at night, neon lights reflecting on wet pavement..."></textarea>
             </div>
             <button id="btnTxt" onclick="runTxt2Img()">🚀 FLUX 启动 (极速生成)</button>
         </div>
@@ -102,6 +96,7 @@ const HTML_CONTENT = `
     </div>
 
     <script>
+        // Tab 切换逻辑
         function switchTab(mode) {
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -128,7 +123,7 @@ const HTML_CONTENT = `
 
         slider.oninput = () => sliderVal.innerText = slider.value;
 
-        // 图片预处理
+        // 图片预处理 (SDXL Lightning 支持 1024x1024)
         fileIn.onchange = e => {
             const file = e.target.files[0];
             if (!file) return;
@@ -138,11 +133,14 @@ const HTML_CONTENT = `
                 img.onload = () => {
                     const canvas = document.createElement('canvas');
                     const ctx = canvas.getContext('2d');
-                    const SIZE = 512;
+                    
+                    // 升级到 1024px (SDXL 原生分辨率)
+                    const SIZE = 1024;
                     canvas.width = SIZE; canvas.height = SIZE;
                     const minScale = Math.max(SIZE/img.width, SIZE/img.height);
                     const w = img.width*minScale; const h = img.height*minScale;
                     ctx.drawImage(img, (SIZE-w)/2, (SIZE-h)/2, w, h);
+                    
                     canvas.toBlob(blob => {
                         processedBlob = blob;
                         imgOrigin.src = URL.createObjectURL(blob);
@@ -154,29 +152,24 @@ const HTML_CONTENT = `
             reader.readAsDataURL(file);
         };
 
-        // 通用生成逻辑 (接收 Base64)
+        // 统一发送请求函数
         async function sendRequest(payload) {
             const res = await fetch("", {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
+            
             if(!res.ok) throw new Error(await res.text());
             
-            // 关键改动：我们直接把响应当 Blob 处理 (后端如果直接返回二进制)
-            // 如果后端返回 JSON，我们解析 JSON 里的 Base64
-            const contentType = res.headers.get("content-type");
-            if (contentType && contentType.includes("application/json")) {
-                const json = await res.json();
-                if (json.image) {
-                    return "data:image/png;base64," + json.image;
-                } else {
-                    throw new Error("No image data returned");
-                }
+            // 后端统一返回 JSON: { image: "base64_string" }
+            const json = await res.json();
+            
+            if (json.image) {
+                // 直接构建 Data URL，浏览器 100% 能显示
+                return "data:image/png;base64," + json.image;
             } else {
-                // 如果是直接二进制流
-                const blob = await res.blob();
-                return URL.createObjectURL(blob);
+                throw new Error("No image data in response");
             }
         }
 
@@ -186,29 +179,28 @@ const HTML_CONTENT = `
             
             const btn = document.getElementById('btnImg');
             btn.disabled = true;
-            msg.innerText = "v1.5 正在重绘 (Img2Img)...";
+            msg.innerText = "SDXL Lightning 正在重绘...";
             imgResult.classList.remove('show');
 
             try {
+                // 转 Base64
                 const buf = await processedBlob.arrayBuffer();
-                const uint8 = Array.from(new Uint8Array(buf));
-                
-                // Base64 转换 (手动实现简单版，防止无库依赖)
-                const base64String = btoa(
-                    new Uint8Array(buf)
-                        .reduce((data, byte) => data + String.fromCharCode(byte), '')
-                );
+                let binary = '';
+                const bytes = new Uint8Array(buf);
+                const len = bytes.byteLength;
+                for (let i = 0; i < len; i++) binary += String.fromCharCode(bytes[i]);
+                const base64Img = btoa(binary);
 
                 const imageUrl = await sendRequest({
-                    type: 'img2img',
+                    type: 'img2img', // 后端会调用 SDXL Lightning
                     prompt: document.getElementById('promptImg').value,
-                    image_base64: base64String, // 发送 Base64 字符串
+                    image_base64: base64Img,
                     strength: parseFloat(slider.value)
                 });
                 
                 imgResult.src = imageUrl;
                 imgResult.classList.add('show');
-                msg.innerText = "✨ v1.5 生成成功！";
+                msg.innerText = "✨ SDXL 生成成功！";
             } catch(e) { console.error(e); msg.innerText = "❌ Error: " + e.message; }
             finally { btn.disabled = false; }
         }
@@ -219,12 +211,12 @@ const HTML_CONTENT = `
             
             const btn = document.getElementById('btnTxt');
             btn.disabled = true;
-            msg.innerText = "FLUX 正在极速生成 (Txt2Img)...";
+            msg.innerText = "FLUX 正在生成...";
             imgResult.classList.remove('show');
 
             try {
                 const imageUrl = await sendRequest({
-                    type: 'txt2img',
+                    type: 'txt2img', // 后端会调用 FLUX
                     prompt: prompt
                 });
                 
@@ -251,62 +243,79 @@ export default {
       try {
         const data = await request.json();
         const ai = new Ai(env.AI);
-        let response; // 存储 AI 原始响应
+        
+        let rawResponse; 
+        // 用于存储生成的二进制数据 (ArrayBuffer)
+        let arrayBuffer;
 
-        // ----------------------------------------------------
-        // 模式 1: Img2Img (v1.5)
-        // ----------------------------------------------------
+        // ==========================================
+        // 模式 1: Img2Img (SDXL Lightning)
+        // ==========================================
         if (data.type === 'img2img') {
-            // 将 Base64 字符串转回 Uint8Array
+            const MODEL_ID = '@cf/bytedance/stable-diffusion-xl-lightning';
+            
+            // 解码前端传来的 Base64 图片
             const binaryString = atob(data.image_base64);
             const bytes = new Uint8Array(binaryString.length);
             for (let i = 0; i < binaryString.length; i++) {
                 bytes[i] = binaryString.charCodeAt(i);
             }
-            
-            response = await ai.run('@cf/runwayml/stable-diffusion-v1-5-img2img', {
-                prompt: `${data.prompt}, (masterpiece:1.2), (photorealistic:1.3), 8k resolution, cinematic lighting`,
-                negative_prompt: "blur, low quality, cartoon, 3d, painting, illustration, deformed, ugly, distorted face, bad anatomy, watermark, text",
-                image: [...bytes], // 必须转为数组
+
+            // SDXL Lightning 支持 image 参数
+            rawResponse = await ai.run(MODEL_ID, {
+                prompt: data.prompt + ", masterpiece, 8k, photorealistic",
+                image: [...bytes], // 传入图片数组
                 strength: data.strength || 0.5,
-                guidance: 7.5,
-                num_steps: 20
+                num_steps: 4, // Lightning 只需要 4-8 步
+                guidance: 7.5
             });
+            
+            // SDXL Lightning 返回的是二进制流
+            arrayBuffer = await new Response(rawResponse).arrayBuffer();
         }
 
-        // ----------------------------------------------------
-        // 模式 2: Txt2Image (FLUX)
-        // ----------------------------------------------------
+        // ==========================================
+        // 模式 2: Txt2Img (FLUX Schnell)
+        // ==========================================
         else if (data.type === 'txt2img') {
-            // FLUX 文生图
-            response = await ai.run('@cf/black-forest-labs/flux-1-schnell', {
+            const MODEL_ID = '@cf/black-forest-labs/flux-1-schnell';
+            
+            // Flux 返回的是 JSON: { image: "base64..." }
+            rawResponse = await ai.run(MODEL_ID, {
                 prompt: data.prompt,
-                num_steps: 4 
+                num_steps: 4
             });
+            
+            // Flux 特殊处理：它返回的是 JSON 对象，不是二进制流
+            if (rawResponse.image) {
+                // 如果已经是 JSON 且包含 image 字段，直接返回给前端
+                return new Response(JSON.stringify({ image: rawResponse.image }), {
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            } else {
+                 // 防御性编程：万一将来 Flux 返回格式变了
+                 arrayBuffer = await new Response(rawResponse).arrayBuffer();
+            }
         }
         else {
             return new Response('Invalid type', { status: 400 });
         }
 
-        // ----------------------------------------------------
-        // 关键修复：统一转换为 Base64 返回给前端
-        // Cloudflare AI 返回的是 ReadableStream，我们需要读取并转换
-        // ----------------------------------------------------
-        const headers = { 'Content-Type': 'application/json' };
-        
-        // 将 Response 对象转换为 ArrayBuffer
-        const arrayBuffer = await new Response(response).arrayBuffer();
-        
-        // 手动转 Base64 (避免依赖外部库)
-        let binary = '';
-        const bytes = new Uint8Array(arrayBuffer);
-        const len = bytes.byteLength;
-        for (let i = 0; i < len; i++) {
-            binary += String.fromCharCode(bytes[i]);
-        }
-        const base64Image = btoa(binary);
+        // ==========================================
+        // 统一格式化为 JSON { image: "base64" }
+        // 针对二进制流的返回（SDXL Lightning）
+        // ==========================================
+        if (arrayBuffer) {
+            let binary = '';
+            const bytes = new Uint8Array(arrayBuffer);
+            const len = bytes.byteLength;
+            for (let i = 0; i < len; i++) binary += String.fromCharCode(bytes[i]);
+            const base64Image = btoa(binary);
 
-        return new Response(JSON.stringify({ image: base64Image }), { headers });
+            return new Response(JSON.stringify({ image: base64Image }), {
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
 
       } catch (error) {
         return new Response(JSON.stringify({ error: error.message }), { 
